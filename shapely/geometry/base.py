@@ -11,6 +11,7 @@ from warnings import warn
 import numpy as np
 
 import shapely
+from shapely import lib
 from shapely._geometry_helpers import _geom_factory
 from shapely.constructive import BufferCapStyle, BufferJoinStyle
 from shapely.coords import CoordinateSequence
@@ -310,25 +311,31 @@ class BaseGeometry(shapely.Geometry):
     @property
     def area(self):
         """Unitless area of the geometry (float)"""
-        return float(shapely.area(self))
+        return float(lib.area(self))
 
     def distance(self, other):
         """Unitless distance to other geometry (float)"""
+        if isinstance(other, BaseGeometry):
+            return lib.distance(self, other).item()
+
         return _maybe_unpack(shapely.distance(self, other))
 
     def hausdorff_distance(self, other):
         """Unitless hausdorff distance to other geometry (float)"""
+        if isinstance(other, BaseGeometry):
+            return lib.hausdorff_distance(self, other).item()
+
         return _maybe_unpack(shapely.hausdorff_distance(self, other))
 
     @property
     def length(self):
         """Unitless length of the geometry (float)"""
-        return float(shapely.length(self))
+        return float(lib.length(self))
 
     @property
     def minimum_clearance(self):
         """Unitless distance by which a node could be moved to produce an invalid geometry (float)"""
-        return float(shapely.minimum_clearance(self))
+        return float(lib.minimum_clearance(self))
 
     # Topological properties
     # ----------------------
@@ -341,31 +348,32 @@ class BaseGeometry(shapely.Geometry):
         collection of points. The boundary of a point is an empty (null)
         collection.
         """
-        return shapely.boundary(self)
+        return lib.boundary(self)
 
     @property
     def bounds(self):
         """Returns minimum bounding region (minx, miny, maxx, maxy)"""
-        return tuple(shapely.bounds(self).tolist())
+        out = np.empty((4,), dtype="float64")
+        return tuple(lib.bounds(self, out=out))
 
     @property
     def centroid(self):
         """Returns the geometric center of the object"""
-        return shapely.centroid(self)
+        return lib.centroid(self)
 
     def point_on_surface(self):
         """Returns a point guaranteed to be within the object, cheaply.
 
         Alias of `representative_point`.
         """
-        return shapely.point_on_surface(self)
+        return lib.point_on_surface(self)
 
     def representative_point(self):
         """Returns a point guaranteed to be within the object, cheaply.
 
         Alias of `point_on_surface`.
         """
-        return shapely.point_on_surface(self)
+        return lib.point_on_surface(self)
 
     @property
     def convex_hull(self):
@@ -375,12 +383,12 @@ class BaseGeometry(shapely.Geometry):
         The convex hull of a three member multipoint, for example, is a
         triangular polygon.
         """
-        return shapely.convex_hull(self)
+        return lib.convex_hull(self)
 
     @property
     def envelope(self):
         """A figure that envelopes the geometry"""
-        return shapely.envelope(self)
+        return lib.envelope(self)
 
     @property
     def oriented_envelope(self):
@@ -394,7 +402,7 @@ class BaseGeometry(shapely.Geometry):
 
         Alias of `minimum_rotated_rectangle`.
         """
-        return shapely.oriented_envelope(self)
+        return lib.oriented_envelope(self)
 
     @property
     def minimum_rotated_rectangle(self):
@@ -408,7 +416,7 @@ class BaseGeometry(shapely.Geometry):
 
         Alias of `oriented_envelope`.
         """
-        return shapely.oriented_envelope(self)
+        return lib.oriented_envelope(self)
 
     def buffer(
         self,
@@ -525,14 +533,29 @@ class BaseGeometry(shapely.Geometry):
         elif not np.isfinite(distance).all():
             raise ValueError("buffer distance must be finite")
 
-        return shapely.buffer(
+        if isinstance(cap_style, str):
+            cap_style = BufferCapStyle.get_value(cap_style)
+        if isinstance(join_style, str):
+            join_style = BufferJoinStyle.get_value(join_style)
+        if not np.isscalar(quad_segs):
+            raise TypeError("quad_segs only accepts scalar values")
+        if not np.isscalar(cap_style):
+            raise TypeError("cap_style only accepts scalar values")
+        if not np.isscalar(join_style):
+            raise TypeError("join_style only accepts scalar values")
+        if not np.isscalar(mitre_limit):
+            raise TypeError("mitre_limit only accepts scalar values")
+        if not np.isscalar(single_sided):
+            raise TypeError("single_sided only accepts scalar values")
+
+        return lib.buffer(
             self,
             distance,
-            quad_segs=quad_segs,
-            cap_style=cap_style,
-            join_style=join_style,
-            mitre_limit=mitre_limit,
-            single_sided=single_sided,
+            np.intc(quad_segs),
+            np.intc(cap_style),
+            np.intc(join_style),
+            mitre_limit,
+            np.bool_(single_sided),
         )
 
     def simplify(self, tolerance, preserve_topology=True):
@@ -544,7 +567,10 @@ class BaseGeometry(shapely.Geometry):
         option is used, the algorithm may produce self-intersecting or
         otherwise invalid geometries.
         """
-        return shapely.simplify(self, tolerance, preserve_topology=preserve_topology)
+        if preserve_topology:
+            return lib.simplify_preserve_topology(self, tolerance)
+        else:
+            return lib.simplify(self, tolerance)
 
     def normalize(self):
         """Converts geometry to normal form (or canonical form).
@@ -560,7 +586,7 @@ class BaseGeometry(shapely.Geometry):
         >>> line.normalize()
         <MULTILINESTRING ((2 2, 3 3), (0 0, 1 1))>
         """
-        return shapely.normalize(self)
+        return lib.normalize(self)
 
     # Overlay operations
     # ---------------------------
